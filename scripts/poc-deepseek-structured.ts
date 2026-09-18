@@ -1,4 +1,6 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+dotenv.config({ override: true });
+
 import { generateObject } from "ai";
 import { z } from "zod";
 import { flashModel } from "../lib/llm/client";
