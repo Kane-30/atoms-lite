@@ -7,6 +7,7 @@ import { getDb } from "@/lib/db/client";
 import { users } from "@/lib/db/schema";
 
 const Body = z.object({
+  name: z.string().trim().min(1).max(40),
   email: z.string().email(),
   password: z.string().min(8),
 });
@@ -32,9 +33,10 @@ export async function POST(request: Request) {
     .insert(users)
     .values({
       email,
+      name: parsed.data.name,
       passwordHash: await hashPassword(parsed.data.password),
     })
-    .returning({ id: users.id, email: users.email });
+    .returning({ id: users.id, email: users.email, name: users.name });
 
   await createSession(user.id);
   return NextResponse.json({ user });

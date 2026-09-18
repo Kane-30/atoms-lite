@@ -28,12 +28,27 @@ export function createLlmProvider() {
   return createOpenAI({
     apiKey,
     baseURL,
-    fetch: async (input, init) => globalThis.fetch(input, init),
+    fetch: async (input, init) => {
+      if (init?.body) {
+        const text =
+          typeof init.body === "string"
+            ? init.body
+            : init.body instanceof Uint8Array
+              ? new TextDecoder().decode(init.body)
+              : null;
+        if (text?.startsWith("{")) {
+          const json = JSON.parse(text) as Record<string, unknown>;
+          json.thinking = { type: "disabled" };
+          init = { ...init, body: JSON.stringify(json) };
+        }
+      }
+      return globalThis.fetch(input, init);
+    },
   });
 }
 
 export function flashModel() {
   return createLlmProvider()(
-    process.env.LLM_MODEL_FLASH ?? "deepseek-chat",
+    process.env.LLM_MODEL_FLASH ?? "deepseek-flash",
   );
 }

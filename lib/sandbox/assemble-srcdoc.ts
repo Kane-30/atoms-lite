@@ -80,9 +80,16 @@ function hrefFromLinkTag(tag: string): string | null {
   return m ? m[1] : null;
 }
 
+function deferAppScripts(html: string): string {
+  return html.replace(/<script>([\s\S]*?)<\/script>/gi, (full, body: string) => {
+    if (body.includes("atomslite:req") || body.includes("__atomsliteReady.then")) return full;
+    return `<script>window.__atomsliteReady.then(function(){\n${body}\n});</script>`;
+  });
+}
+
 function injectBridgeSdk(html: string): string {
   const bridgeTag = `<script>${BRIDGE_SDK_SOURCE}</script>`;
-  if (html.includes("window.atomslite")) return html;
+  if (html.includes("atomslite:req")) return html;
   const headClose = html.match(/<\/head>/i);
   if (headClose && headClose.index !== undefined) {
     return (
@@ -176,6 +183,9 @@ export function assembleSrcdoc(files: ProjectFile[]): {
   });
 
   html = injectBridgeSdk(html);
+  if (html.includes("__atomsliteReady")) {
+    html = deferAppScripts(html);
+  }
 
   return { html, missing, blockedCdns };
 }

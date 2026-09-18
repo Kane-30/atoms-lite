@@ -1,6 +1,15 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/lib/db/client";
-import { messages, projects, rounds } from "@/lib/db/schema";
+import {
+  appData,
+  files as projectFiles,
+  messages,
+  projects,
+  publications,
+  rounds,
+  snapshots,
+  steps,
+} from "@/lib/db/schema";
 
 export async function createProject(
   userId: string,
@@ -78,5 +87,50 @@ export async function getProjectForUser(projectId: string, userId: string) {
     .where(eq(messages.projectId, projectId))
     .orderBy(messages.createdAt);
 
-  return { project, rounds: projectRounds, messages: projectMessages };
+  const projectSteps = await db
+    .select()
+    .from(steps)
+    .where(eq(steps.roundId, project.currentRoundId ?? ""))
+    .orderBy(steps.seq);
+
+  const projectFilesRows = await db
+    .select()
+    .from(projectFiles)
+    .where(eq(projectFiles.projectId, projectId));
+
+  return {
+    project,
+    rounds: projectRounds,
+    messages: projectMessages,
+    steps: project.currentRoundId ? projectSteps : [],
+    files: projectFilesRows,
+  };
+}
+
+export async function deleteProjectForUser(projectId: string, userId: string): Promise<boolean> {
+  const db = getDb();
+  const [project] = await db
+    .select({ id: projects.id })
+    .from(projects)
+    .where(and(eq(projects.id, projectId), eq(projects.userId, userId)))
+    .limit(1);
+  if (!project) return false;
+
+  const projectRounds = await db
+    .select({ id: rounds.id })
+    .from(rounds)
+    .where(eq(rounds.projectId, projectId));
+  const roundIds = projectRounds.map((round) => round.id);
+
+  await db.delete(messages).where(eq(messages.projectId, projectId));
+  if (roundIds.length > 0) {
+    await db.delete(steps).where(inArray(steps.roundId, roundIds));
+  }
+  await db.delete(snapshots).where(eq(snapshots.projectId, projectId));
+  await db.delete(appData).where(eq(appData.projectId, projectId));
+  await db.delete(projectFiles).where(eq(projectFiles.projectId, projectId));
+  await db.delete(publications).where(eq(publications.projectId, projectId));
+  await db.delete(rounds).where(eq(rounds.projectId, projectId));
+  await db.delete(projects).where(and(eq(projects.id, projectId), eq(projects.userId, userId)));
+  return true;
 }

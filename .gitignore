@@ -40,6 +40,9 @@ drizzle/meta/
 # superpowers scratch
 .superpowers/
 
+# local agent memory
+.workbuddy/
+
 # vercel / edgeone
 .vercel
 .edgeone

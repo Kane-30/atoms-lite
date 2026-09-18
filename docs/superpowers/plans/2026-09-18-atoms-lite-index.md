@@ -1,6 +1,6 @@
 # atoms-lite 模块拆分与任务索引
 
-> **Spec**：`docs/atoms-demo落地方案规划设计.md` v4.3  
+> **Spec**：`docs/atoms-demo落地方案规划设计.md` v4.4  
 > **方法**：superpowers `writing-plans`（多子系统 → 分模块独立计划）  
 > **成功标准**：完整可用基线 = Must（M1–M11）+ 延展 S1/S2/S3 + 全量代码视图；P2/W 不进验收  
 > **执行**：每个模块计划独立可测；按依赖顺序执行；推荐 `subagent-driven-development` 逐任务推进
@@ -148,7 +148,7 @@ atoms/
 
 ## 5. Global Constraints（所有模块共用）
 
-从 spec v4.3 原文约束，每个任务默认遵守：
+从 spec v4.4 原文约束，每个任务默认遵守：
 
 1. **唯一写路径是对话** — 代码视图只读；不做 Visual Editor / 真 Theme 面板（W13/D20）
 2. **只承认文件系统真实变化** — 完成判定看 diff + 锚点，不看模型文字（§9.0）
@@ -160,7 +160,7 @@ atoms/
 8. **LLM** = Vercel AI SDK + DeepSeek；OpenAI 兼容 `baseURL` 可切换（D8）
 9. **发布** = 用户点击触发，不是编排末步（v4.3）
 10. **部署** = EdgeOne Pages 主 + Cloudflare Pages 备；不用 Vercel 作提交主链接（D16）
-11. **验收集合不因赶工缩小**；P2（C1–C6）不进本次验收
+11. **验收集合不因赶工缩小**；P2 仅 C1、C3–C6 不进本次验收。**C2 终端已升入 M5**（右栏第三页，不是系统 shell）
 12. **语言** = TypeScript strict；UI = Tailwind + shadcn/ui
 
 ---

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/session";
-import { getProjectForUser } from "@/lib/db/projects";
+import { deleteProjectForUser, getProjectForUser } from "@/lib/db/projects";
 
 export async function GET(
   _request: Request,
@@ -14,6 +14,23 @@ export async function GET(
       return NextResponse.json({ error: "not_found" }, { status: 404 });
     }
     return NextResponse.json(project);
+  } catch {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+}
+
+export async function DELETE(
+  _request: Request,
+  context: { params: Promise<{ id: string }> },
+) {
+  try {
+    const user = await requireUser();
+    const { id } = await context.params;
+    const deleted = await deleteProjectForUser(id, user.id);
+    if (!deleted) {
+      return NextResponse.json({ error: "not_found" }, { status: 404 });
+    }
+    return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }

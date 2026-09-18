@@ -70,14 +70,14 @@ export async function readSessionUserId(): Promise<string | null> {
   return decode(token)?.userId ?? null;
 }
 
-export async function requireUser(): Promise<{ id: string; email: string }> {
+export async function requireUser(): Promise<{ id: string; email: string; name: string }> {
   const userId = await readSessionUserId();
   if (!userId) {
     throw new Error("unauthorized");
   }
   const db = getDb();
   const [user] = await db
-    .select({ id: users.id, email: users.email })
+    .select({ id: users.id, email: users.email, name: users.name })
     .from(users)
     .where(eq(users.id, userId))
     .limit(1);

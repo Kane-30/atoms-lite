@@ -4,9 +4,9 @@
 >
 > **Index:** [2026-09-18-atoms-lite-index.md](./2026-09-18-atoms-lite-index.md) · **Depends on:** D · **Spec:** §10.2 §7 · M3 M5 · 持久化 B/C
 
-**Goal:** 落地页示例 + 双栏工作台；步骤卡片（含折叠）；流式进度；刷新后对话/轮次完整恢复。
+**Goal:** 落地页示例 + 双栏工作台；左栏对话与步骤；右栏预览 / 代码 / 终端（v4.4，终端已是 M5，不是 P2）。
 
-**Architecture:** 左 28% / 右 72%；右栏先只放预览占位（F/G 填充）；消息与步骤全部读 DB。
+**Architecture:** 左 28% / 右 72%。右栏三页：预览用已有 srcdoc，代码只读文件树，终端展示步骤与校验结论。个人中心仍是 `/projects`，本模块不重做登录页视觉。
 
 **Tech Stack:** shadcn ResizablePanel · AI SDK UI 流（若用 data stream）或轮询/SSE
 
@@ -54,7 +54,7 @@ git commit -m "feat: landing prompt box with examples and pending prompt"
   - 左：消息流 + 步骤卡（显示 agentRole / status / 成本）
   - 已完成步骤折叠为「已完成 N 步」
   - 输入框在底部（本模块可先禁用增量，占位「生成完成后可继续修改」）
-  - 右：Tab「预览 | 代码」壳；预览区暂时显示「等待生成」
+  - 右：Tab「预览 | 代码 | 终端」。预览放 iframe；代码放目录树和只读源码；终端放步骤状态与 `verifyResult`
 
 - [ ] **Step 2: 审批 UI**
   - spec 的 step-card 可增删功能项 → 调 approve API → 继续 code
