@@ -14,7 +14,17 @@ describe("buildCodePrompt", () => {
     });
     expect(prompt).toContain("data-feature");
     expect(prompt).toContain("window.atomslite.db");
+    expect(prompt).toContain("list");
+    expect(prompt).toContain("insert");
+    expect(prompt).toContain("update");
+    expect(prompt).toContain("remove");
     expect(prompt).toContain("localStorage");
+    expect(prompt).toContain("sessionStorage");
+    expect(prompt).toContain("IndexedDB");
+    expect(prompt).toContain("cookie");
+    expect(prompt).toContain("能点的界面");
+    expect(prompt).toContain("不能只写说明文字");
+    expect(prompt).toContain("空状态");
     expect(prompt).toContain("index.html");
   });
 });

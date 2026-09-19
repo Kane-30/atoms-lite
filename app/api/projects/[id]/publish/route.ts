@@ -2,11 +2,7 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/session";
 import { getProjectForUser } from "@/lib/db/projects";
 import { publishProject } from "@/lib/db/publications";
-
-function publishedUrl(slug: string): string {
-  const base = (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/$/, "");
-  return `${base}/published/${slug}`;
-}
+import { publishedUrl } from "@/lib/publish/public-url";
 
 export async function POST(
   _request: Request,

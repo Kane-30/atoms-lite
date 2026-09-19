@@ -46,3 +46,6 @@ drizzle/meta/
 # vercel / edgeone
 .vercel
 .edgeone
+
+# edgeone build output
+.tef_dist/

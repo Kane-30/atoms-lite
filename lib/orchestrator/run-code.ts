@@ -16,10 +16,21 @@ function usageTokens(usage: { promptTokens?: number; completionTokens?: number }
   };
 }
 
-function problemsOf(files: { path: string; content: string }[], spec: SpecOutput) {
+const FORBIDDEN_CLIENT_STORAGE = /localStorage|sessionStorage|indexedDB/i;
+const MAX_REPAIR_ROUNDS = 2;
+
+function indexHtmlSource(files: { path: string; content: string }[]) {
+  return files
+    .filter((file) => /(^|\/)index\.html$/i.test(file.path.replace(/^\.\//, "")))
+    .map((file) => file.content)
+    .join("\n");
+}
+
+export function problemsOf(files: { path: string; content: string }[], spec: SpecOutput) {
   const assembled = assembleSrcdoc(files);
+  const indexHtml = indexHtmlSource(files);
   const missingFeatures = spec.features
-    .filter((feature) => !assembled.html.includes(`data-feature="${feature.id}"`))
+    .filter((feature) => !indexHtml.includes(`data-feature="${feature.id}"`))
     .map((feature) => `缺少 data-feature="${feature.id}"`);
   const scripts = files
     .filter((file) => file.path.endsWith(".js"))
@@ -29,7 +40,7 @@ function problemsOf(files: { path: string; content: string }[], spec: SpecOutput
   if (scripts && !scripts.includes("atomslite.db")) {
     persistence.push("脚本必须调用 window.atomslite.db");
   }
-  if (/localStorage|sessionStorage|indexedDB/i.test(scripts)) {
+  if (FORBIDDEN_CLIENT_STORAGE.test(scripts) || FORBIDDEN_CLIENT_STORAGE.test(indexHtml)) {
     persistence.push("禁止使用 localStorage、sessionStorage、indexedDB");
   }
   return {
@@ -40,6 +51,14 @@ function problemsOf(files: { path: string; content: string }[], spec: SpecOutput
       ...missingFeatures,
       ...persistence,
     ],
+  };
+}
+
+export function outcomeOf(issues: string[]) {
+  const ok = issues.length === 0;
+  return {
+    status: ok ? ("done" as const) : ("failed" as const),
+    verifyResult: ok ? "ok" : issues.join("；").slice(0, 500),
   };
 }
 
@@ -116,14 +135,15 @@ export async function runCodeForProject(
     }
 
     let check = problemsOf(written, spec);
-    if (check.issues.length > 0) {
+    for (let round = 0; round < MAX_REPAIR_ROUNDS && check.issues.length > 0; round += 1) {
+      const reason = check.issues.join("；");
       const targets = written.filter((file) => /\.(html|js)$/.test(file.path));
       for (const target of targets) {
         const repair = await writeOne(
           spec,
           target.path,
           written.filter((file) => file.path !== target.path),
-          check.issues.join("；"),
+          reason,
         );
         const index = written.findIndex((file) => file.path === target.path);
         if (index >= 0) written[index] = repair.file;
@@ -134,17 +154,18 @@ export async function runCodeForProject(
     }
 
     await upsertProjectFiles(projectId, written);
-    const ok = check.issues.length === 0;
+    const outcome = outcomeOf(check.issues);
+    const ok = outcome.status === "done";
     const [saved] = await db
       .update(steps)
       .set({
-        status: ok ? "done" : "failed",
+        status: outcome.status,
         output: { paths: written.map((file) => file.path) },
         changedFiles: written.map((file) => file.path),
         tokensIn,
         tokensOut,
         durationMs: Date.now() - started,
-        verifyResult: ok ? "ok" : check.issues.join("；").slice(0, 500),
+        verifyResult: outcome.verifyResult,
       })
       .where(eq(steps.id, step.id))
       .returning();

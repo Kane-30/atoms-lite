@@ -87,11 +87,15 @@ export async function getProjectForUser(projectId: string, userId: string) {
     .where(eq(messages.projectId, projectId))
     .orderBy(messages.createdAt);
 
-  const projectSteps = await db
-    .select()
-    .from(steps)
-    .where(eq(steps.roundId, project.currentRoundId ?? ""))
-    .orderBy(steps.seq);
+  const roundIds = projectRounds.map((round) => round.id);
+  const projectSteps =
+    roundIds.length === 0
+      ? []
+      : await db
+          .select()
+          .from(steps)
+          .where(inArray(steps.roundId, roundIds))
+          .orderBy(steps.seq);
 
   const projectFilesRows = await db
     .select()
@@ -102,7 +106,7 @@ export async function getProjectForUser(projectId: string, userId: string) {
     project,
     rounds: projectRounds,
     messages: projectMessages,
-    steps: project.currentRoundId ? projectSteps : [],
+    steps: projectSteps,
     files: projectFilesRows,
   };
 }

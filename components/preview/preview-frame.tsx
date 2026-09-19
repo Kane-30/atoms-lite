@@ -19,12 +19,12 @@ export function PreviewFrame({
   projectId,
   srcDoc,
   title = "应用预览",
-  className = "h-full w-full bg-white",
+  className = "h-full w-full",
   onReady,
 }: PreviewFrameProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const onReadyRef = useRef(onReady);
-  const [armed, setArmed] = useState(false);
+  const [listening, setListening] = useState(false);
   onReadyRef.current = onReady;
 
   useEffect(() => {
@@ -80,12 +80,15 @@ export function PreviewFrame({
     };
 
     window.addEventListener("message", onMessage);
-    setArmed(true);
+    setListening(true);
     return () => {
       window.removeEventListener("message", onMessage);
-      setArmed(false);
     };
   }, [projectId]);
+
+  if (!listening || !srcDoc) {
+    return <div className={className} />;
+  }
 
   return (
     <iframe
@@ -93,7 +96,7 @@ export function PreviewFrame({
       title={title}
       sandbox="allow-scripts allow-forms"
       referrerPolicy="no-referrer"
-      srcDoc={armed ? srcDoc : ""}
+      srcDoc={srcDoc}
       className={className}
     />
   );

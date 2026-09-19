@@ -37,18 +37,25 @@ export default async function WorkbenchPage({
       projectId={id}
       title={data.project.title}
       prompt={data.rounds[0]?.prompt ?? ""}
-      roundIndex={data.rounds[0]?.index ?? 1}
       spec={readSpec(specStep?.output)}
       specStatus={specStep?.status ?? null}
       codeStatus={codeStep?.status ?? null}
       steps={data.steps.map((step) => ({
         id: step.id,
+        roundId: step.roundId,
         seq: step.seq,
         key: step.key,
         agentRole: step.agentRole,
         status: step.status,
         verifyResult: step.verifyResult,
         output: step.output,
+        changedFiles: step.changedFiles,
+      }))}
+      messages={data.messages.map((message) => ({
+        id: message.id,
+        roundId: message.roundId,
+        role: message.role,
+        content: message.content,
       }))}
       files={data.files.map((file) => ({ path: file.path, content: file.content }))}
       srcDoc={preview?.html ?? ""}
