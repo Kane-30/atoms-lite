@@ -1,16 +1,16 @@
 import { and, desc, eq } from "drizzle-orm";
-import { generateObject } from "ai";
 import { getDb } from "@/lib/db/client";
 import { files as projectFiles, messages, projects, rounds, steps } from "@/lib/db/schema";
-import { flashModel } from "@/lib/llm/client";
+import { streamSchema } from "@/lib/llm/stream-schema";
 import { buildModifyPrompt, type ModifyPromptInput } from "@/lib/prompts/modify";
 import { ModifyFileSchema, type ModifyFileOutput } from "@/lib/schemas/modify";
 import { upsertProjectFiles } from "@/lib/orchestrator/write-files";
 import { verifyApplication, type VerifyResult } from "@/lib/verify/verify-application";
+import { dedupeText, fileStreamText } from "@/lib/workbench/live-stream";
+import { dbCallIssues } from "@/lib/orchestrator/db-call-issues";
 
 export const MODIFY_RUNNING_WINDOW_MS = 180_000;
 const MAX_MODEL_CALLS = 8;
-const FORBIDDEN_CLIENT_STORAGE = /localStorage|sessionStorage|indexedDB/i;
 
 type FileSnapshot = { path: string; content: string };
 
@@ -127,8 +127,9 @@ function draftProblem(path: string, content: string): string | null {
   if (!content.trim()) {
     return "content 不能为空。请输出该文件改完后的全文。";
   }
-  if (normalized.endsWith(".js") && FORBIDDEN_CLIENT_STORAGE.test(content)) {
-    return "禁止 localStorage、sessionStorage、indexedDB。数据只能走 window.atomslite.db。";
+  const calls = dbCallIssues(content);
+  if (calls.length > 0) {
+    return `${calls.join("；")}。数据只能走 window.atomslite.db，且第一个参数必须是集合名。`;
   }
   return null;
 }
@@ -184,11 +185,20 @@ export async function collectModifyWrites(
   return { writes, tokensIn, tokensOut };
 }
 
-async function generateModifyFile(input: ModifyPromptInput): Promise<ModifyGenerateResult> {
-  const { object, usage } = await generateObject({
-    model: flashModel(),
+async function generateModifyFile(
+  input: ModifyPromptInput,
+  onText?: (text: string) => void,
+): Promise<ModifyGenerateResult> {
+  const push = dedupeText(onText);
+  const { object, usage } = await streamSchema({
     schema: ModifyFileSchema,
     prompt: buildModifyPrompt(input),
+    onPartial: (partial) => {
+      const value = partial && typeof partial === "object" ? (partial as { path?: unknown; content?: unknown }) : {};
+      const path = typeof value.path === "string" ? value.path : "";
+      const content = typeof value.content === "string" ? value.content : "";
+      push(fileStreamText("正在改", path, content));
+    },
   });
   return {
     file: object,
@@ -197,6 +207,10 @@ async function generateModifyFile(input: ModifyPromptInput): Promise<ModifyGener
       out: usage.completionTokens ?? 0,
     },
   };
+}
+
+export function streamingModifyGenerator(onText?: (text: string) => void): GenerateModifyFile {
+  return (input) => generateModifyFile(input, onText);
 }
 
 export async function runModifyForProject(

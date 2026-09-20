@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { useSubmitLock } from "@/lib/ui/use-submit-lock";
+import { readEventStream } from "@/lib/workbench/live-stream";
 
 type Feature = { id: string; title: string; acceptance: string };
 type Spec = { appName: string; features: Feature[]; pages: string[] };
@@ -13,11 +14,19 @@ export function SpecRunner({
   initial,
   confirmed,
   codeStatus,
+  onText,
+  onStreamStart,
+  onStreamFinish,
+  onStreamReset,
 }: {
   projectId: string;
   initial: Spec | null;
   confirmed: boolean;
   codeStatus: string | null;
+  onText?: (text: string) => void;
+  onStreamStart?: () => void;
+  onStreamFinish?: () => void;
+  onStreamReset?: () => void;
 }) {
   const router = useRouter();
   const { pending, run } = useSubmitLock();
@@ -32,26 +41,25 @@ export function SpecRunner({
   useEffect(() => {
     if (initial || started.current) return;
     started.current = true;
+    onStreamStart?.();
     void run(`spec:${projectId}`, async () => {
       const res = await fetch(`/api/projects/${projectId}/spec`, { method: "POST" });
       if (!res.ok) {
+        onStreamReset?.();
         setError("需求拆解失败，请刷新再试一次");
         return false;
       }
-      const data = (await res.json()) as { output: Spec | null };
-      if (data.output && !Array.isArray((data.output as { features?: unknown }).features)) {
-        router.refresh();
+      const outcome = await readEventStream(res, (text) => onText?.(text));
+      if (!outcome.ok) {
+        onStreamReset?.();
+        setError("需求拆解失败，请刷新再试一次");
         return false;
       }
-      if (!data.output) {
-        setError("还在生成中，请稍后再刷新");
-        return false;
-      }
-      setSpec(data.output);
-      setKept(data.output.features.map((feature) => feature.id));
+      onStreamFinish?.();
+      router.refresh();
       return false;
     });
-  }, [initial, projectId, run]);
+  }, [initial, onStreamFinish, onStreamReset, onStreamStart, onText, projectId, router, run]);
 
   function toggle(id: string) {
     setKept((current) =>
@@ -65,6 +73,7 @@ export function SpecRunner({
     if (features.length === 0) return;
     setPhase("writing");
     setError("");
+    onStreamStart?.();
     void run(`approve:${projectId}`, async () => {
       const res = await fetch(`/api/projects/${projectId}/approve`, {
         method: "POST",
@@ -72,11 +81,20 @@ export function SpecRunner({
         body: JSON.stringify({ features }),
       });
       if (!res.ok) {
+        onStreamReset?.();
+        setPhase("spec");
+        setError("写代码失败，请再确认一次");
+        return false;
+      }
+      const outcome = await readEventStream(res, (text) => onText?.(text));
+      if (!outcome.ok) {
+        onStreamReset?.();
         setPhase("spec");
         setError("写代码失败，请再确认一次");
         return false;
       }
       setPhase("done");
+      onStreamFinish?.();
       router.refresh();
       return false;
     });

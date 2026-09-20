@@ -1,13 +1,18 @@
 import { and, eq } from "drizzle-orm";
-import { generateObject } from "ai";
 import { getDb } from "@/lib/db/client";
 import { messages, projects, rounds, steps } from "@/lib/db/schema";
-import { flashModel } from "@/lib/llm/client";
+import { streamSchema } from "@/lib/llm/stream-schema";
 import { buildCodePrompt, CODE_PATHS } from "@/lib/prompts/code";
 import { CodeFileSchema } from "@/lib/schemas/code";
+import { dedupeText, fileStreamText } from "@/lib/workbench/live-stream";
 import { SpecSchema, type SpecOutput } from "@/lib/schemas/spec";
 import { assembleSrcdoc } from "@/lib/sandbox/assemble-srcdoc";
 import { upsertProjectFiles } from "@/lib/orchestrator/write-files";
+import { dbCallIssues } from "@/lib/orchestrator/db-call-issues";
+import {
+  atomsliteDbOverrideIssues,
+  scriptWiringIssues,
+} from "@/lib/orchestrator/script-wiring";
 
 function usageTokens(usage: { promptTokens?: number; completionTokens?: number }) {
   return {
@@ -16,7 +21,6 @@ function usageTokens(usage: { promptTokens?: number; completionTokens?: number }
   };
 }
 
-const FORBIDDEN_CLIENT_STORAGE = /localStorage|sessionStorage|indexedDB/i;
 const MAX_REPAIR_ROUNDS = 2;
 
 function indexHtmlSource(files: { path: string; content: string }[]) {
@@ -40,9 +44,9 @@ export function problemsOf(files: { path: string; content: string }[], spec: Spe
   if (scripts && !scripts.includes("atomslite.db")) {
     persistence.push("脚本必须调用 window.atomslite.db");
   }
-  if (FORBIDDEN_CLIENT_STORAGE.test(scripts) || FORBIDDEN_CLIENT_STORAGE.test(indexHtml)) {
-    persistence.push("禁止使用 localStorage、sessionStorage、indexedDB");
-  }
+  persistence.push(...dbCallIssues(`${scripts}\n${indexHtml}`));
+  persistence.push(...atomsliteDbOverrideIssues(scripts));
+  persistence.push(...scriptWiringIssues(files));
   return {
     html: assembled.html,
     issues: [
@@ -67,11 +71,17 @@ async function writeOne(
   path: string,
   written: { path: string; content: string }[],
   repair?: string,
+  onText?: (text: string) => void,
 ) {
-  const { object, usage } = await generateObject({
-    model: flashModel(),
+  const push = dedupeText(onText);
+  const { object, usage } = await streamSchema({
     schema: CodeFileSchema,
     prompt: buildCodePrompt({ spec, path, written, repair }),
+    onPartial: (partial) => {
+      const raw = recordOf(partial).content;
+      const content = typeof raw === "string" ? raw : "";
+      push(fileStreamText("正在写", path, content));
+    },
   });
   return {
     file: { path, content: object.content },
@@ -79,11 +89,16 @@ async function writeOne(
   };
 }
 
+function recordOf(value: unknown): { content?: unknown } {
+  return value && typeof value === "object" ? (value as { content?: unknown }) : {};
+}
+
 export async function runCodeForProject(
   projectId: string,
   userId: string,
   spec: SpecOutput,
   paths?: string[],
+  options?: { onText?: (text: string) => void },
 ) {
   const db = getDb();
   const [project] = await db
@@ -128,7 +143,7 @@ export async function runCodeForProject(
     let tokensIn = 0;
     let tokensOut = 0;
     for (const path of paths?.length ? paths : CODE_PATHS) {
-      const result = await writeOne(spec, path, written);
+      const result = await writeOne(spec, path, written, undefined, options?.onText);
       written.push(result.file);
       tokensIn += result.tokens.in;
       tokensOut += result.tokens.out;
@@ -144,6 +159,7 @@ export async function runCodeForProject(
           target.path,
           written.filter((file) => file.path !== target.path),
           reason,
+          options?.onText,
         );
         const index = written.findIndex((file) => file.path === target.path);
         if (index >= 0) written[index] = repair.file;

@@ -96,13 +96,13 @@ describe("collectModifyWrites", () => {
     expect(settled.status).toBe("failed");
   });
 
-  it("drops illegal paths and forbidden storage instead of writing them", async () => {
+  it("drops illegal paths and empty list() instead of writing them", async () => {
     const { writes } = await collectModifyWrites(
       "改一下",
       before,
       scripted([
         { stop: false, path: "../../secret", content: "nope" },
-        { stop: false, path: "scripts/app.js", content: "localStorage.setItem('a', 'b')" },
+        { stop: false, path: "scripts/app.js", content: "window.atomslite.db.list()" },
         { stop: true, path: "", content: "" },
       ]),
     );
@@ -146,6 +146,9 @@ describe("buildModifyPrompt", () => {
       written: [],
     });
     expect(prompt).toContain("window.atomslite.db");
+    expect(prompt).toContain("集合名");
+    expect(prompt).toContain('list("');
+    expect(prompt).not.toContain("禁止 localStorage");
     expect(prompt).toContain("index.html");
     expect(prompt).toContain("data-feature");
     expect(prompt).not.toContain("跳一跳");

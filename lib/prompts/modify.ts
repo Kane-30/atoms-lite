@@ -1,3 +1,5 @@
+import { atomsliteDbGuidance, interactionGuidance } from "@/lib/prompts/guidance";
+
 export type ModifyPromptInput = {
   userPrompt: string;
   files: { path: string; content: string }[];
@@ -18,8 +20,8 @@ export function buildModifyPrompt(input: ModifyPromptInput): string {
     "如果没有任何文件需要改，stop 为 true，path 和 content 都是空字符串。",
     "path 是相对路径，不超过两层，例如 index.html 或 scripts/app.js。禁止 .. 和绝对路径。",
     "入口始终是 index.html，不要把入口改成别的文件名。",
-    "数据读写只能走 window.atomslite.db 的 list、insert、update、remove，它们都返回 Promise。",
-    "禁止 localStorage、sessionStorage、indexedDB、cookie。",
+    atomsliteDbGuidance(),
+    interactionGuidance(),
     "保留所有已有的 data-feature 标记，不要删掉。",
     "只用浏览器原生 API。外链脚本或样式只能来自 cdn.jsdelivr.net、unpkg.com、esm.sh，能不用就不用。",
     "",

@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { avatarLabel, displayName } from "@/lib/auth/avatar";
 import { CodeView } from "@/components/code-view/code-view";
 import { PreviewFrame } from "@/components/preview/preview-frame";
 import { PublishButton } from "@/components/publish/publish-button";
@@ -34,6 +35,8 @@ export function WorkbenchShell({
   messages,
   files,
   srcDoc,
+  viewerName,
+  viewerEmail,
 }: {
   projectId: string;
   title: string;
@@ -45,14 +48,49 @@ export function WorkbenchShell({
   messages: ThreadMessage[];
   files: ShellFile[];
   srcDoc: string;
+  viewerName: string;
+  viewerEmail: string;
 }) {
   const [tab, setTab] = useState<"preview" | "code">("preview");
+  const [liveText, setLiveText] = useState("");
+  const [pendingUser, setPendingUser] = useState("");
+  const awaitingRefresh = useRef(false);
+  const scroller = useRef<HTMLDivElement>(null);
   const hasPlan = steps.some((step) => step.key === "plan");
   const showSpecRunner =
     specStatus === "waiting_approval" ||
     codeStatus === "failed" ||
     codeStatus === "running" ||
     (!hasPlan && specStatus !== "done");
+
+  useEffect(() => {
+    if (!awaitingRefresh.current) return;
+    awaitingRefresh.current = false;
+    setLiveText("");
+    setPendingUser("");
+  }, [messages, steps]);
+
+  useEffect(() => {
+    const node = scroller.current;
+    if (!node || (!liveText && !pendingUser)) return;
+    node.scrollTop = node.scrollHeight;
+  }, [liveText, pendingUser]);
+
+  function startStream(userText = "") {
+    awaitingRefresh.current = false;
+    setPendingUser(userText);
+    setLiveText("");
+  }
+
+  function finishStream() {
+    awaitingRefresh.current = true;
+  }
+
+  function resetStream() {
+    awaitingRefresh.current = false;
+    setLiveText("");
+    setPendingUser("");
+  }
 
   return (
     <div className="flex h-screen bg-neutral-950 text-neutral-100">
@@ -64,12 +102,18 @@ export function WorkbenchShell({
           </div>
           <h1 className="mt-2 text-base font-semibold">{title}</h1>
         </header>
-        <div className="flex-1 space-y-4 overflow-auto px-4 py-4">
+        <div ref={scroller} className="flex-1 space-y-4 overflow-auto px-4 py-4">
           <ChatThread
             projectId={projectId}
             messages={messages}
             steps={steps}
             fallbackPrompt={prompt}
+            liveText={liveText}
+            pendingUser={pendingUser}
+            onText={setLiveText}
+            onStreamStart={() => startStream()}
+            onStreamFinish={finishStream}
+            onStreamReset={resetStream}
           />
           {showSpecRunner ? (
             <SpecRunner
@@ -77,12 +121,23 @@ export function WorkbenchShell({
               initial={spec}
               confirmed={specStatus === "done"}
               codeStatus={codeStatus}
+              onText={setLiveText}
+              onStreamStart={() => startStream()}
+              onStreamFinish={finishStream}
+              onStreamReset={resetStream}
             />
           ) : null}
         </div>
         <div className="border-t border-white/15 bg-neutral-900 p-4">
           <p className="mb-2 text-[11px] tracking-wide text-neutral-500">输入</p>
-          <ModifyBox projectId={projectId} locked={steps.some(isPlanWaitingApproval)} />
+          <ModifyBox
+            projectId={projectId}
+            locked={steps.some(isPlanWaitingApproval)}
+            onText={setLiveText}
+            onStreamStart={startStream}
+            onStreamFinish={finishStream}
+            onStreamReset={resetStream}
+          />
         </div>
       </aside>
       <section className="flex min-w-0 flex-1 flex-col">
@@ -106,7 +161,13 @@ export function WorkbenchShell({
           </div>
           <div className="flex items-center gap-3">
             <PublishButton projectId={projectId} />
-            <Link className="text-neutral-300 underline" href="/projects">个人中心</Link>
+            <Link
+              href="/projects"
+              aria-label="个人中心"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-violet-600 text-xs font-medium text-white"
+            >
+              {avatarLabel(displayName(viewerName, viewerEmail))}
+            </Link>
           </div>
         </div>
         <div className="min-h-0 flex-1 bg-neutral-900">

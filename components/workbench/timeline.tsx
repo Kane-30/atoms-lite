@@ -55,9 +55,17 @@ export function handledStepCount(steps: ShellStep[]): number {
 export function WorkbenchTimeline({
   projectId,
   steps,
+  onText,
+  onStreamStart,
+  onStreamFinish,
+  onStreamReset,
 }: {
   projectId: string;
   steps: ShellStep[];
+  onText?: (text: string) => void;
+  onStreamStart?: () => void;
+  onStreamFinish?: () => void;
+  onStreamReset?: () => void;
 }) {
   const ordered = [...steps].sort((a, b) => a.seq - b.seq);
   const handled = handledStepCount(ordered);
@@ -111,7 +119,14 @@ export function WorkbenchTimeline({
                     ) : null}
                     {step.verifyResult ? <p className="mt-1 text-neutral-400">{step.verifyResult}</p> : null}
                     {isPlanWaitingApproval(step) ? (
-                      <PlanApproval projectId={projectId} output={step.output} />
+                      <PlanApproval
+                        projectId={projectId}
+                        output={step.output}
+                        onText={onText}
+                        onStreamStart={onStreamStart}
+                        onStreamFinish={onStreamFinish}
+                        onStreamReset={onStreamReset}
+                      />
                     ) : null}
                   </div>
                 </li>

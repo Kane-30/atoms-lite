@@ -18,7 +18,7 @@ export default async function WorkbenchPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  let user: { id: string };
+  let user: { id: string; email: string; name: string };
   try {
     user = await requireUser();
   } catch {
@@ -59,6 +59,8 @@ export default async function WorkbenchPage({
       }))}
       files={data.files.map((file) => ({ path: file.path, content: file.content }))}
       srcDoc={preview?.html ?? ""}
+      viewerName={user.name}
+      viewerEmail={user.email}
     />
   );
 }

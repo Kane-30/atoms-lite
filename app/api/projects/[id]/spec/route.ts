@@ -1,6 +1,10 @@
-import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/session";
 import { runPlanForProject } from "@/lib/orchestrator/run-plan";
+import { sseResponse } from "@/lib/workbench/live-stream";
+import { NextResponse } from "next/server";
+
+export const maxDuration = 300;
+export const dynamic = "force-dynamic";
 
 export async function POST(
   _request: Request,
@@ -9,16 +13,15 @@ export async function POST(
   try {
     const user = await requireUser();
     const { id } = await context.params;
-    const result = await runPlanForProject(id, user.id);
-    if (!result) {
-      return NextResponse.json({ error: "not_found" }, { status: 404 });
-    }
-    return NextResponse.json({
-      stepId: result.step.id,
-      status: result.step.status,
-      output: result.step.output,
-      created: result.created,
-      model: result.model,
+    return sseResponse(async (send) => {
+      const result = await runPlanForProject(id, user.id, {
+        onText: (text) => send({ type: "text", text }),
+      });
+      if (!result) {
+        send({ type: "error", message: "not_found" });
+        return;
+      }
+      send({ type: "done" });
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "spec_failed";

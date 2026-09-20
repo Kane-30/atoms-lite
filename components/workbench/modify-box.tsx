@@ -4,8 +4,23 @@ import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { useSubmitLock } from "@/lib/ui/use-submit-lock";
+import { readEventStream } from "@/lib/workbench/live-stream";
 
-export function ModifyBox({ projectId, locked }: { projectId: string; locked: boolean }) {
+export function ModifyBox({
+  projectId,
+  locked,
+  onText,
+  onStreamStart,
+  onStreamFinish,
+  onStreamReset,
+}: {
+  projectId: string;
+  locked: boolean;
+  onText?: (text: string) => void;
+  onStreamStart?: (prompt: string) => void;
+  onStreamFinish?: () => void;
+  onStreamReset?: () => void;
+}) {
   const router = useRouter();
   const { pending, run } = useSubmitLock();
   const [prompt, setPrompt] = useState("");
@@ -16,6 +31,7 @@ export function ModifyBox({ projectId, locked }: { projectId: string; locked: bo
     event.preventDefault();
     if (!value || locked) return;
     setError("");
+    onStreamStart?.(value);
     void run(value, async () => {
       try {
         const res = await fetch(`/api/projects/${projectId}/modify`, {
@@ -23,14 +39,23 @@ export function ModifyBox({ projectId, locked }: { projectId: string; locked: bo
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ prompt: value }),
         });
-        if (res.status === 200) {
-          setPrompt("");
-          router.refresh();
+        if (!res.ok) {
+          onStreamReset?.();
+          setError("没改成");
           return false;
         }
-        setError(res.status === 409 ? "还不能改，先等当前这步结束" : "没改成");
+        const outcome = await readEventStream(res, (text) => onText?.(text));
+        if (!outcome.ok) {
+          onStreamReset?.();
+          setError(outcome.message === "not_ready" ? "还不能改，先等当前这步结束" : "没改成");
+          return false;
+        }
+        setPrompt("");
+        onStreamFinish?.();
+        router.refresh();
         return false;
       } catch {
+        onStreamReset?.();
         setError("没改成");
         return false;
       }

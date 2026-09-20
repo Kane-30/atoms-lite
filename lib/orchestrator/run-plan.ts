@@ -1,12 +1,16 @@
 import { and, eq } from "drizzle-orm";
-import { generateObject } from "ai";
-import { flashModel } from "@/lib/llm/client";
+import { streamSchema } from "@/lib/llm/stream-schema";
 import { buildPlanPrompt } from "@/lib/prompts/plan";
 import { PlanSchema, type PlanOutput } from "@/lib/schemas/plan";
 import { getDb } from "@/lib/db/client";
 import { messages, projects, rounds, steps } from "@/lib/db/schema";
+import { dedupeText, planStreamText } from "@/lib/workbench/live-stream";
 
-export async function runPlanForProject(projectId: string, userId: string) {
+export async function runPlanForProject(
+  projectId: string,
+  userId: string,
+  options?: { onText?: (text: string) => void },
+) {
   const db = getDb();
   const [project] = await db
     .select()
@@ -54,10 +58,11 @@ export async function runPlanForProject(projectId: string, userId: string) {
 
   const started = Date.now();
   try {
-    const { object, usage } = await generateObject({
-      model: flashModel(),
+    const push = dedupeText(options?.onText);
+    const { object, usage } = await streamSchema({
       schema: PlanSchema,
       prompt: buildPlanPrompt(round.prompt),
+      onPartial: (partial) => push(planStreamText(partial)),
     });
 
     const [saved] = await db

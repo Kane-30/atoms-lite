@@ -2,8 +2,10 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/session";
 import { approveSpecAndGenerate } from "@/lib/orchestrator/approve-spec";
 import { SpecSchema } from "@/lib/schemas/spec";
+import { sseResponse } from "@/lib/workbench/live-stream";
 
 export const maxDuration = 300;
+export const dynamic = "force-dynamic";
 
 export async function POST(
   request: Request,
@@ -18,11 +20,19 @@ export async function POST(
     const features = body.features
       ? SpecSchema.shape.features.parse(body.features)
       : undefined;
-    const result = await approveSpecAndGenerate(id, user.id, features);
-    if (!result) {
-      return NextResponse.json({ error: "not_ready" }, { status: 409 });
-    }
-    return NextResponse.json(result);
+    return sseResponse(async (send) => {
+      const result = await approveSpecAndGenerate(
+        id,
+        user.id,
+        features,
+        (text) => send({ type: "text", text }),
+      );
+      if (!result) {
+        send({ type: "error", message: "not_ready" });
+        return;
+      }
+      send({ type: "done" });
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "approve_failed";
     if (message === "unauthorized") {

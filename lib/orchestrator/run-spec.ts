@@ -1,15 +1,15 @@
 import { and, eq } from "drizzle-orm";
-import { generateObject } from "ai";
-import { flashModel } from "@/lib/llm/client";
+import { streamSchema } from "@/lib/llm/stream-schema";
 import { buildSpecPrompt } from "@/lib/prompts/spec";
 import { SpecSchema, type SpecOutput } from "@/lib/schemas/spec";
 import { getDb } from "@/lib/db/client";
 import { messages, projects, rounds, steps } from "@/lib/db/schema";
+import { dedupeText, specStreamText } from "@/lib/workbench/live-stream";
 
 export async function runSpecForProject(
   projectId: string,
   userId: string,
-  options?: { pause?: boolean },
+  options?: { pause?: boolean; onText?: (text: string) => void },
 ) {
   const db = getDb();
   const [project] = await db
@@ -57,10 +57,11 @@ export async function runSpecForProject(
 
   const started = Date.now();
   try {
-    const { object, usage } = await generateObject({
-      model: flashModel(),
+    const push = dedupeText(options?.onText);
+    const { object, usage } = await streamSchema({
       schema: SpecSchema,
       prompt: buildSpecPrompt(round.prompt),
+      onPartial: (partial) => push(specStreamText(partial)),
     });
 
     const [saved] = await db

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { useSubmitLock } from "@/lib/ui/use-submit-lock";
+import { readEventStream } from "@/lib/workbench/live-stream";
 
 export type PlanView = {
   goal: string;
@@ -87,7 +88,21 @@ export function PlanApprovalView({
   );
 }
 
-export function PlanApproval({ projectId, output }: { projectId: string; output: unknown }) {
+export function PlanApproval({
+  projectId,
+  output,
+  onText,
+  onStreamStart,
+  onStreamFinish,
+  onStreamReset,
+}: {
+  projectId: string;
+  output: unknown;
+  onText?: (text: string) => void;
+  onStreamStart?: () => void;
+  onStreamFinish?: () => void;
+  onStreamReset?: () => void;
+}) {
   const router = useRouter();
   const { pending, run } = useSubmitLock();
   const [error, setError] = useState("");
@@ -95,6 +110,7 @@ export function PlanApproval({ projectId, output }: { projectId: string; output:
 
   function approve() {
     setError("");
+    onStreamStart?.();
     void run(`plan:${projectId}`, async () => {
       const res = await fetch(`/api/projects/${projectId}/approve`, {
         method: "POST",
@@ -102,9 +118,17 @@ export function PlanApproval({ projectId, output }: { projectId: string; output:
         body: JSON.stringify({}),
       });
       if (!res.ok) {
+        onStreamReset?.();
         setError("批准失败，请再试一次");
         return false;
       }
+      const outcome = await readEventStream(res, (text) => onText?.(text));
+      if (!outcome.ok) {
+        onStreamReset?.();
+        setError("批准失败，请再试一次");
+        return false;
+      }
+      onStreamFinish?.();
       router.refresh();
       return true;
     });

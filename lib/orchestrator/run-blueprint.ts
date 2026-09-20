@@ -1,8 +1,7 @@
 import { and, eq } from "drizzle-orm";
-import { generateObject } from "ai";
 import { getDb } from "@/lib/db/client";
 import { messages, projects, steps } from "@/lib/db/schema";
-import { flashModel } from "@/lib/llm/client";
+import { streamSchema } from "@/lib/llm/stream-schema";
 import { buildBlueprintPrompt } from "@/lib/prompts/blueprint";
 import {
   BlueprintSchema,
@@ -10,11 +9,13 @@ import {
   type BlueprintOutput,
 } from "@/lib/schemas/blueprint";
 import type { SpecOutput } from "@/lib/schemas/spec";
+import { blueprintStreamText, dedupeText } from "@/lib/workbench/live-stream";
 
 export async function runBlueprintForProject(
   projectId: string,
   userId: string,
   spec: SpecOutput,
+  options?: { onText?: (text: string) => void },
 ) {
   const db = getDb();
   const [project] = await db
@@ -51,10 +52,11 @@ export async function runBlueprintForProject(
 
   const started = Date.now();
   try {
-    const { object, usage } = await generateObject({
-      model: flashModel(),
+    const push = dedupeText(options?.onText);
+    const { object, usage } = await streamSchema({
       schema: BlueprintSchema,
       prompt: buildBlueprintPrompt(spec),
+      onPartial: (partial) => push(blueprintStreamText(partial)),
     });
     const blueprint: BlueprintOutput = {
       ...object,

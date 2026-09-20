@@ -10,6 +10,7 @@ export async function approveSpecAndGenerate(
   projectId: string,
   userId: string,
   features?: SpecOutput["features"],
+  onText?: (text: string) => void,
 ) {
   const db = getDb();
   const [project] = await db
@@ -29,15 +30,16 @@ export async function approveSpecAndGenerate(
       .update(steps)
       .set({ status: "done", approvedAt: new Date() })
       .where(eq(steps.id, planStep.id));
-    const specResult = await runSpecForProject(projectId, userId, { pause: false });
+    const specResult = await runSpecForProject(projectId, userId, { pause: false, onText });
     const spec = specResult?.spec ?? parseSpecOutput(specResult?.step.output);
     if (!spec) return null;
-    const blueprint = await runBlueprintForProject(projectId, userId, spec);
+    const blueprint = await runBlueprintForProject(projectId, userId, spec, { onText });
     return runCodeForProject(
       projectId,
       userId,
       spec,
       blueprint?.blueprint.files.map((file) => file.path),
+      { onText },
     );
   }
 
@@ -64,7 +66,7 @@ export async function approveSpecAndGenerate(
       .where(eq(steps.id, specStep.id));
   }
 
-  const result = await runCodeForProject(projectId, userId, spec);
+  const result = await runCodeForProject(projectId, userId, spec, undefined, { onText });
   if (!result) return null;
   if (result.status === "done" && result.files.length === 0) {
     const saved = await db

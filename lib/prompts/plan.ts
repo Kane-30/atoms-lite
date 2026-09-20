@@ -2,7 +2,7 @@ export function buildPlanPrompt(userPrompt: string): string {
   return [
     "你是团队领导。根据用户的一句话，写出这一轮的执行计划。",
     "只做能在一个纯静态网页里完成的事。不要规划独立服务器、账号系统或应用自己的数据库。",
-    "需要记住的数据一律走平台已有的 window.atomslite.db，不要写 localStorage、sessionStorage 或 IndexedDB。",
+    "需要记住的数据一律走平台已有的 window.atomslite.db：list/insert/update/remove 的第一个参数都是集合名字符串。",
     "scope 最多 6 条。明确写出 outOfScope，避免需求膨胀。",
     "steps 里依次安排产品经理、架构师、工程师各一项。",
     "approvalQuestion 用一句话问用户是否批准这个范围。",
