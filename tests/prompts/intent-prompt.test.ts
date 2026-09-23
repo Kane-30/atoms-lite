@@ -6,20 +6,22 @@ import {
 } from "@/lib/prompts/intent";
 
 describe("intent prompts", () => {
-  it("tells the classifier to prefer ask on hybrid questions", () => {
-    const prompt = buildIntentClassifyPrompt("清空有吗？没有就加上");
-    expect(prompt).toContain("优先 ask");
-    expect(prompt).toContain("清空有吗？没有就加上");
+  it("lets the model classify ask vs modify", () => {
+    const prompt = buildIntentClassifyPrompt("这个导数功能怎么用？");
+    expect(prompt).toContain("intent=ask");
+    expect(prompt).toContain("intent=modify");
+    expect(prompt).toContain("这个导数功能怎么用？");
   });
 
-  it("builds an ask reply prompt from current files", () => {
+  it("builds a free-form ask reply prompt from current files", () => {
     const prompt = buildAskReplyPrompt({
-      userPrompt: "清空在哪",
-      files: [{ path: "index.html", content: "<button>C</button>" }],
+      userPrompt: "这个导数功能怎么用？",
+      files: [{ path: "index.html", content: "<button>d/dx</button>" }],
     });
-    expect(prompt).toContain("不要改文件");
+    expect(prompt).toContain("不要改任何文件");
+    expect(prompt).toContain("怎么组织回答由你自己决定");
     expect(prompt).toContain("index.html");
-    expect(prompt).toContain("<button>C</button>");
+    expect(prompt).toContain("<button>d/dx</button>");
   });
 
   it("builds an unchanged explain prompt", () => {
