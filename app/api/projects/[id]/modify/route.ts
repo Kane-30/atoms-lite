@@ -20,12 +20,10 @@ export async function POST(
       return NextResponse.json({ error: "invalid_prompt" }, { status: 400 });
     }
     return sseResponse(async (send) => {
-      const result = await runModifyForProject(
-        id,
-        user.id,
-        parsed.data.prompt,
-        streamingModifyGenerator((text) => send({ type: "text", text })),
-      );
+      const result = await runModifyForProject(id, user.id, parsed.data.prompt, {
+        generate: streamingModifyGenerator((text) => send({ type: "text", text })),
+        onText: (text) => send({ type: "text", text }),
+      });
       if ("error" in result) {
         send({ type: "error", message: result.error });
         return;

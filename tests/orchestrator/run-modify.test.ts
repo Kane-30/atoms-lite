@@ -5,6 +5,7 @@ import {
   MODIFY_RUNNING_WINDOW_MS,
   modifyBlocked,
   settleModify,
+  settlementWithExplain,
   type GenerateModifyFile,
 } from "@/lib/orchestrator/run-modify";
 
@@ -24,7 +25,7 @@ function scripted(drafts: { stop: boolean; path: string; content: string }[]): G
 const before = [file("index.html", '<button data-feature="add-record">记</button>')];
 
 describe("settleModify", () => {
-  it("turns NO_FILE_CHANGED into a failed step", () => {
+  it("turns NO_FILE_CHANGED into a failed step before explain upgrade", () => {
     const settled = settleModify(before, []);
     expect(settled.code).toBe("NO_FILE_CHANGED");
     expect(settled.status).toBe("failed");
@@ -32,6 +33,14 @@ describe("settleModify", () => {
     expect(settled.verifyResult).toContain("NO_FILE_CHANGED");
     expect(settled.summary).toContain("不是系统崩溃");
     expect(settled.changedFiles).toEqual([]);
+  });
+
+  it("upgrades NO_FILE_CHANGED with an explain reply to done/unchanged", () => {
+    const settled = settleModify(before, []);
+    const upgraded = settlementWithExplain(settled, "清空已经有了：界面上的 C 按钮。");
+    expect(upgraded.status).toBe("done");
+    expect(upgraded.verifyResult).toBe("unchanged");
+    expect(upgraded.summary).toContain("C 按钮");
   });
 
   it("turns IDENTICAL_CONTENT into a failed step", () => {

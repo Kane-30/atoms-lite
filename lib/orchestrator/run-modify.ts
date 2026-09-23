@@ -3,12 +3,23 @@ import { getDb } from "@/lib/db/client";
 import { files as projectFiles, messages, projects, rounds, steps } from "@/lib/db/schema";
 import { streamSchema } from "@/lib/llm/stream-schema";
 import { buildModifyPrompt, type ModifyPromptInput } from "@/lib/prompts/modify";
+import {
+  buildAskReplyPrompt,
+  buildIntentClassifyPrompt,
+  buildUnchangedExplainPrompt,
+} from "@/lib/prompts/intent";
 import { ModifyFileSchema, type ModifyFileOutput } from "@/lib/schemas/modify";
+import { WorkbenchIntentSchema, WorkbenchReplySchema } from "@/lib/schemas/intent";
 import { upsertProjectFiles } from "@/lib/orchestrator/write-files";
 import { verifyApplication, type VerifyResult } from "@/lib/verify/verify-application";
 import { dedupeText, fileStreamText } from "@/lib/workbench/live-stream";
 import { dbCallIssues } from "@/lib/orchestrator/db-call-issues";
 import { scriptWiringIssues } from "@/lib/orchestrator/script-wiring";
+import {
+  classifyWorkbenchIntent,
+  type ModelIntentClassifier,
+  type WorkbenchIntent,
+} from "@/lib/orchestrator/intent";
 
 export const MODIFY_RUNNING_WINDOW_MS = 180_000;
 const MAX_MODEL_CALLS = 8;
@@ -21,6 +32,11 @@ export type ModifyGenerateResult = {
 };
 
 export type GenerateModifyFile = (input: ModifyPromptInput) => Promise<ModifyGenerateResult>;
+
+export type GenerateReply = (prompt: string) => Promise<{
+  reply: string;
+  tokens: { in: number; out: number };
+}>;
 
 export type ModifySettlement = {
   code: VerifyResult["code"];
@@ -40,7 +56,15 @@ export type RunModifyResult =
       status: "done" | "failed";
       verifyResult: string;
       changedFiles: string[];
+      intent: WorkbenchIntent;
     };
+
+export type RunModifyOptions = {
+  generate?: GenerateModifyFile;
+  classifyWithModel?: ModelIntentClassifier;
+  generateReply?: GenerateReply;
+  onText?: (text: string) => void;
+};
 
 export function normalizeModifyPath(path: string): string | null {
   const trimmed = path.trim().replace(/\\/g, "/").replace(/^\.\//, "");
@@ -96,6 +120,22 @@ export function outcomeFromVerify(result: VerifyResult): Pick<
     status: "failed",
     verifyResult: `改坏了（REGRESSION），丢了 data-feature：${missing}`,
     summary: `改坏了，丢了 data-feature：${missing}`,
+  };
+}
+
+/** Upgrade a no-op modify into a successful explained reply. */
+export function settlementWithExplain(
+  settled: ModifySettlement,
+  reply: string,
+): ModifySettlement {
+  if (settled.code !== "NO_FILE_CHANGED" && settled.code !== "IDENTICAL_CONTENT") {
+    return settled;
+  }
+  return {
+    ...settled,
+    status: "done",
+    verifyResult: "unchanged",
+    summary: reply.trim() || settled.summary,
   };
 }
 
@@ -240,12 +280,54 @@ export function streamingModifyGenerator(onText?: (text: string) => void): Gener
   return (input) => generateModifyFile(input, onText);
 }
 
+async function defaultClassifyWithModel(prompt: string) {
+  const { object } = await streamSchema({
+    schema: WorkbenchIntentSchema,
+    prompt: buildIntentClassifyPrompt(prompt),
+  });
+  return { intent: object.intent, reason: object.reason };
+}
+
+async function defaultGenerateReply(prompt: string, onText?: (text: string) => void) {
+  const push = dedupeText(onText);
+  const { object, usage } = await streamSchema({
+    schema: WorkbenchReplySchema,
+    prompt,
+    onPartial: (partial) => {
+      const value = partial && typeof partial === "object" ? (partial as { reply?: unknown }) : {};
+      if (typeof value.reply === "string" && value.reply.trim()) push(value.reply);
+    },
+  });
+  return {
+    reply: object.reply,
+    tokens: {
+      in: usage.promptTokens ?? 0,
+      out: usage.completionTokens ?? 0,
+    },
+  };
+}
+
+function normalizeRunOptions(
+  generateOrOptions?: GenerateModifyFile | RunModifyOptions,
+): RunModifyOptions {
+  if (typeof generateOrOptions === "function") {
+    return { generate: generateOrOptions };
+  }
+  return generateOrOptions ?? {};
+}
+
 export async function runModifyForProject(
   projectId: string,
   userId: string,
   userPrompt: string,
-  generate: GenerateModifyFile = generateModifyFile,
+  generateOrOptions?: GenerateModifyFile | RunModifyOptions,
 ): Promise<RunModifyResult> {
+  const options = normalizeRunOptions(generateOrOptions);
+  const generate = options.generate ?? ((input) => generateModifyFile(input, options.onText));
+  const classifyWithModel = options.classifyWithModel ?? defaultClassifyWithModel;
+  const generateReply =
+    options.generateReply ?? ((prompt) => defaultGenerateReply(prompt, options.onText));
+
   const db = getDb();
   const [project] = await db
     .select()
@@ -258,6 +340,9 @@ export async function runModifyForProject(
     ? await db.select().from(steps).where(eq(steps.roundId, project.currentRoundId))
     : [];
   if (modifyBlocked(currentSteps)) return { error: "not_ready" };
+
+  const decision = await classifyWorkbenchIntent(userPrompt, classifyWithModel);
+  const intent = decision.intent;
 
   const [latest] = await db
     .select({ index: rounds.index })
@@ -273,7 +358,7 @@ export async function runModifyForProject(
       projectId,
       index: roundIndex,
       prompt: userPrompt,
-      intentKind: "modify",
+      intentKind: intent,
       status: "created",
     })
     .returning({ id: rounds.id, index: rounds.index });
@@ -291,13 +376,15 @@ export async function runModifyForProject(
     content: { text: userPrompt },
   });
 
+  const stepKey = intent === "ask" ? "ask" : "modify";
+  const agentRole = intent === "ask" ? "助手" : "工程师";
   const [step] = await db
     .insert(steps)
     .values({
       roundId: round.id,
       seq: 1,
-      key: "modify",
-      agentRole: "工程师",
+      key: stepKey,
+      agentRole,
       status: "running",
       attempts: 1,
     })
@@ -310,21 +397,79 @@ export async function runModifyForProject(
       .from(projectFiles)
       .where(eq(projectFiles.projectId, projectId));
 
+    if (intent === "ask") {
+      const answered = await generateReply(buildAskReplyPrompt({ userPrompt, files: before }));
+      const summary = answered.reply.trim() || "已根据当前代码回答。";
+      await db
+        .update(steps)
+        .set({
+          status: "done",
+          output: { intent, source: decision.source, reason: decision.reason },
+          changedFiles: [],
+          tokensIn: answered.tokens.in,
+          tokensOut: answered.tokens.out,
+          durationMs: Date.now() - started,
+          verifyResult: "answered",
+        })
+        .where(eq(steps.id, step.id));
+      await db.update(rounds).set({ status: "applied" }).where(eq(rounds.id, round.id));
+      await db.insert(messages).values({
+        projectId,
+        roundId: round.id,
+        role: "assistant",
+        kind: "step",
+        content: {
+          stepId: step.id,
+          agentRole,
+          summary,
+        },
+      });
+      return {
+        roundId: round.id,
+        roundIndex: round.index,
+        status: "done",
+        verifyResult: "answered",
+        changedFiles: [],
+        intent,
+      };
+    }
+
     const collected = await collectModifyWrites(userPrompt, before, generate);
     if (collected.writes.length > 0) {
       await upsertProjectFiles(projectId, collected.writes);
     }
-    const settled = settleModify(before, collected.writes);
+    let settled = settleModify(before, collected.writes);
+    let tokensIn = collected.tokensIn;
+    let tokensOut = collected.tokensOut;
+
+    if (settled.code === "NO_FILE_CHANGED" || settled.code === "IDENTICAL_CONTENT") {
+      const explained = await generateReply(
+        buildUnchangedExplainPrompt({
+          userPrompt,
+          files: before,
+          verifyCode: settled.code,
+        }),
+      );
+      tokensIn += explained.tokens.in;
+      tokensOut += explained.tokens.out;
+      settled = settlementWithExplain(settled, explained.reply);
+    }
+
     const verifyResult = settled.verifyResult.slice(0, 500);
 
     await db
       .update(steps)
       .set({
         status: settled.status,
-        output: { paths: settled.changedFiles },
+        output: {
+          paths: settled.changedFiles,
+          intent,
+          source: decision.source,
+          reason: decision.reason,
+        },
         changedFiles: settled.changedFiles,
-        tokensIn: collected.tokensIn,
-        tokensOut: collected.tokensOut,
+        tokensIn,
+        tokensOut,
         durationMs: Date.now() - started,
         verifyResult,
       })
@@ -342,7 +487,7 @@ export async function runModifyForProject(
       kind: "step",
       content: {
         stepId: step.id,
-        agentRole: "工程师",
+        agentRole,
         summary: settled.summary,
       },
     });
@@ -353,6 +498,7 @@ export async function runModifyForProject(
       status: settled.status,
       verifyResult,
       changedFiles: settled.changedFiles,
+      intent,
     };
   } catch (error) {
     await db

@@ -38,6 +38,8 @@ export function stepEventTitle(step: Pick<ShellStep, "key" | "status" | "agentRo
       return "校验";
     case "modify":
       return "按新要求改文件";
+    case "ask":
+      return "回答问题";
     default:
       return step.agentRole;
   }
