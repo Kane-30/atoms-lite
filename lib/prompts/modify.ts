@@ -22,6 +22,7 @@ export function buildModifyPrompt(input: ModifyPromptInput): string {
     "入口始终是 index.html，不要把入口改成别的文件名。",
     atomsliteDbGuidance(),
     interactionGuidance(),
+    "如果改 index.html 并新增 css/js 引用，必须在同一轮后续输出里写出这些文件；最后一包（stop 为 true）时，所有引用必须已经真实存在。",
     "保留所有已有的 data-feature 标记，不要删掉。",
     "只用浏览器原生 API。外链脚本或样式只能来自 cdn.jsdelivr.net、unpkg.com、esm.sh，能不用就不用。",
     "",

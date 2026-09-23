@@ -12,6 +12,16 @@ export function interactionGuidance(): string {
   return [
     "分步交互时，进入下一步输入前要清掉上一步留在当前输入里的值，不要把新输入接到旧值后面。",
     "每个脚本只做自己的职责；不要在多个文件里各自再绑一整套相同的界面事件。",
-    "index.html 必须用 <script src> 按依赖顺序引入本应用的全部 .js 文件，用 <link> 引入全部样式；漏掉任何一个脚本，页面都会点不动。",
+  ].join("");
+}
+
+export function fileListGuidance(allowedPaths: string[]): string {
+  const list = allowedPaths.join("、");
+  const cssJs = allowedPaths.filter((path) => /\.(css|js)$/i.test(path));
+  return [
+    `本轮只允许写这些路径：${list}。不要创建列表外的文件，也不要在 HTML 里引用列表外的路径。`,
+    cssJs.length > 0
+      ? `写 index.html 时，link/script 只能引用本轮列表里的 css/js，并且必须全部引用：${cssJs.join("、")}。`
+      : "写 index.html 时不要引用尚未列入本轮清单的 css/js。",
   ].join("");
 }

@@ -11,6 +11,7 @@ import { upsertProjectFiles } from "@/lib/orchestrator/write-files";
 import { dbCallIssues } from "@/lib/orchestrator/db-call-issues";
 import {
   atomsliteDbOverrideIssues,
+  repairTargets,
   scriptWiringIssues,
 } from "@/lib/orchestrator/script-wiring";
 
@@ -50,10 +51,12 @@ export function problemsOf(files: { path: string; content: string }[], spec: Spe
   return {
     html: assembled.html,
     issues: [
-      ...assembled.missing.map((path) => `缺少文件引用 ${path}`),
-      ...assembled.blockedCdns.map((url) => `外链不在白名单 ${url}`),
-      ...missingFeatures,
-      ...persistence,
+      ...new Set([
+        ...assembled.missing.map((path) => `缺少文件引用 ${path}`),
+        ...assembled.blockedCdns.map((url) => `外链不在白名单 ${url}`),
+        ...missingFeatures,
+        ...persistence,
+      ]),
     ],
   };
 }
@@ -70,13 +73,14 @@ async function writeOne(
   spec: SpecOutput,
   path: string,
   written: { path: string; content: string }[],
+  allowedPaths: string[],
   repair?: string,
   onText?: (text: string) => void,
 ) {
   const push = dedupeText(onText);
   const { object, usage } = await streamSchema({
     schema: CodeFileSchema,
-    prompt: buildCodePrompt({ spec, path, written, repair }),
+    prompt: buildCodePrompt({ spec, path, written, allowedPaths, repair }),
     onPartial: (partial) => {
       const raw = recordOf(partial).content;
       const content = typeof raw === "string" ? raw : "";
@@ -91,6 +95,15 @@ async function writeOne(
 
 function recordOf(value: unknown): { content?: unknown } {
   return value && typeof value === "object" ? (value as { content?: unknown }) : {};
+}
+
+function upsertWritten(
+  written: { path: string; content: string }[],
+  file: { path: string; content: string },
+) {
+  const index = written.findIndex((item) => item.path === file.path);
+  if (index >= 0) written[index] = file;
+  else written.push(file);
 }
 
 export async function runCodeForProject(
@@ -137,13 +150,14 @@ export async function runCodeForProject(
 
   await db.update(steps).set({ status: "running", attempts: (step.attempts ?? 0) + 1 }).where(eq(steps.id, step.id));
 
+  const allowedPaths = [...(paths?.length ? paths : CODE_PATHS)];
   const started = Date.now();
   try {
     const written: { path: string; content: string }[] = [];
     let tokensIn = 0;
     let tokensOut = 0;
-    for (const path of paths?.length ? paths : CODE_PATHS) {
-      const result = await writeOne(spec, path, written, undefined, options?.onText);
+    for (const path of allowedPaths) {
+      const result = await writeOne(spec, path, written, allowedPaths, undefined, options?.onText);
       written.push(result.file);
       tokensIn += result.tokens.in;
       tokensOut += result.tokens.out;
@@ -152,17 +166,21 @@ export async function runCodeForProject(
     let check = problemsOf(written, spec);
     for (let round = 0; round < MAX_REPAIR_ROUNDS && check.issues.length > 0; round += 1) {
       const reason = check.issues.join("；");
-      const targets = written.filter((file) => /\.(html|js)$/.test(file.path));
-      for (const target of targets) {
+      const targets = repairTargets({
+        issues: check.issues,
+        written,
+        allowedPaths,
+      });
+      for (const path of targets) {
         const repair = await writeOne(
           spec,
-          target.path,
-          written.filter((file) => file.path !== target.path),
+          path,
+          written.filter((file) => file.path !== path),
+          allowedPaths,
           reason,
           options?.onText,
         );
-        const index = written.findIndex((file) => file.path === target.path);
-        if (index >= 0) written[index] = repair.file;
+        upsertWritten(written, repair.file);
         tokensIn += repair.tokens.in;
         tokensOut += repair.tokens.out;
       }
@@ -209,7 +227,9 @@ export async function runCodeForProject(
       content: {
         stepId: saved.id,
         agentRole: "工程师",
-        summary: ok ? "三个文件已写完，可以预览" : `写完了，但校验没过：${saved.verifyResult}`,
+        summary: ok
+          ? `${written.length} 个文件已写完，可以预览`
+          : `写完了，但校验没过：${saved.verifyResult}`,
       },
     });
 

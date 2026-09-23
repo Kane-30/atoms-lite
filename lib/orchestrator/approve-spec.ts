@@ -4,7 +4,19 @@ import { files as projectFiles, projects, steps } from "@/lib/db/schema";
 import { parseSpecOutput, runCodeForProject } from "@/lib/orchestrator/run-code";
 import { runBlueprintForProject } from "@/lib/orchestrator/run-blueprint";
 import { runSpecForProject } from "@/lib/orchestrator/run-spec";
+import {
+  BlueprintSchema,
+  normalizeBlueprintFiles,
+} from "@/lib/schemas/blueprint";
 import { SpecSchema, type SpecOutput } from "@/lib/schemas/spec";
+
+export function pathsFromBlueprintStep(output: unknown): string[] | undefined {
+  const parsed = BlueprintSchema.safeParse(output);
+  if (!parsed.success) return undefined;
+  const files = normalizeBlueprintFiles(parsed.data.files);
+  const paths = files.map((file) => file.path).filter(Boolean);
+  return paths.length > 0 ? paths : undefined;
+}
 
 export async function approveSpecAndGenerate(
   projectId: string,
@@ -66,7 +78,19 @@ export async function approveSpecAndGenerate(
       .where(eq(steps.id, specStep.id));
   }
 
-  const result = await runCodeForProject(projectId, userId, spec, undefined, { onText });
+  // Retrying code after a failed first pass: reuse the blueprint file list.
+  // Only fall back to CODE_PATHS inside runCodeForProject when no blueprint exists.
+  const [blueprintStep] = await db
+    .select()
+    .from(steps)
+    .where(and(eq(steps.roundId, project.currentRoundId), eq(steps.key, "blueprint")))
+    .limit(1);
+  const paths =
+    blueprintStep?.status === "done"
+      ? pathsFromBlueprintStep(blueprintStep.output)
+      : undefined;
+
+  const result = await runCodeForProject(projectId, userId, spec, paths, { onText });
   if (!result) return null;
   if (result.status === "done" && result.files.length === 0) {
     const saved = await db

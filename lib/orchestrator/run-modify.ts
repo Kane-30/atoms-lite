@@ -8,6 +8,7 @@ import { upsertProjectFiles } from "@/lib/orchestrator/write-files";
 import { verifyApplication, type VerifyResult } from "@/lib/verify/verify-application";
 import { dedupeText, fileStreamText } from "@/lib/workbench/live-stream";
 import { dbCallIssues } from "@/lib/orchestrator/db-call-issues";
+import { scriptWiringIssues } from "@/lib/orchestrator/script-wiring";
 
 export const MODIFY_RUNNING_WINDOW_MS = 180_000;
 const MAX_MODEL_CALLS = 8;
@@ -75,15 +76,19 @@ export function outcomeFromVerify(result: VerifyResult): Pick<
   if (result.code === "NO_FILE_CHANGED") {
     return {
       status: "failed",
-      verifyResult: "没改到（NO_FILE_CHANGED）",
-      summary: "没改到，文件没有变化",
+      verifyResult:
+        "未改文件：修改前后无差异。常见原因：需求已实现，或模型未写出有效变更（NO_FILE_CHANGED）",
+      summary:
+        "这次没有改任何文件（不是系统崩溃）。对照修改前后没有路径或内容差异。常见原因：你的要求当前代码里已经有了，或者模型没写出有效变更。可以再说具体要改哪一块再试。",
     };
   }
   if (result.code === "IDENTICAL_CONTENT") {
     return {
       status: "failed",
-      verifyResult: "没改到（IDENTICAL_CONTENT）",
-      summary: "没改到，内容实质相同",
+      verifyResult:
+        "写过文件但实质没变。常见原因：需求已实现，或改动被规范化掉（IDENTICAL_CONTENT）",
+      summary:
+        "这次写过文件，但规范化后和原来实质相同（不是系统崩溃）。常见原因：需求已实现，或改动只有空白差异。可以再说具体要改哪一块再试。",
     };
   }
   const missing = result.missingAnchors.join("、");
@@ -119,17 +124,33 @@ export function settleModify(before: FileSnapshot[], writes: FileSnapshot[]): Mo
   };
 }
 
-function draftProblem(path: string, content: string): string | null {
-  const normalized = normalizeModifyPath(path);
+function draftProblem(args: {
+  path: string;
+  content: string;
+  stop: boolean;
+  before: FileSnapshot[];
+  written: FileSnapshot[];
+}): string | null {
+  const normalized = normalizeModifyPath(args.path);
   if (!normalized) {
-    return `路径 ${path} 不合法。只能使用不超过两层的相对路径，入口仍是 index.html。`;
+    return `路径 ${args.path} 不合法。只能使用不超过两层的相对路径，入口仍是 index.html。`;
   }
-  if (!content.trim()) {
+  if (!args.content.trim()) {
     return "content 不能为空。请输出该文件改完后的全文。";
   }
-  const calls = dbCallIssues(content);
+  const calls = dbCallIssues(args.content);
   if (calls.length > 0) {
     return `${calls.join("；")}。数据只能走 window.atomslite.db，且第一个参数必须是集合名。`;
+  }
+  if (args.stop) {
+    const after = applyWrites(args.before, [
+      ...args.written,
+      { path: normalized, content: args.content },
+    ]);
+    const wiring = scriptWiringIssues(after).filter((issue) => issue.startsWith("缺少文件引用"));
+    if (wiring.length > 0) {
+      return `${wiring.join("；")}。改 index 时新增的引用必须在同一轮写出来。`;
+    }
   }
   return null;
 }
@@ -157,7 +178,13 @@ export async function collectModifyWrites(
     const draft = result.file;
     if (draft.stop && !draft.path.trim()) break;
 
-    const problem = draftProblem(draft.path, draft.content);
+    const problem = draftProblem({
+      path: draft.path,
+      content: draft.content,
+      stop: draft.stop,
+      before,
+      written: writes,
+    });
     if (problem) {
       repair = problem;
       continue;

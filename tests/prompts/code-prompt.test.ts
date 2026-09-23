@@ -11,17 +11,17 @@ describe("buildCodePrompt", () => {
       },
       path: "index.html",
       written: [],
+      allowedPaths: ["index.html", "styles/main.css", "scripts/db.js", "scripts/app.js"],
     });
     expect(prompt).toContain("data-feature");
     expect(prompt).toContain("window.atomslite.db");
     expect(prompt).toContain('list("');
-    expect(prompt).toContain("insert");
-    expect(prompt).toContain("update");
-    expect(prompt).toContain("remove");
     expect(prompt).toContain("集合名");
+    expect(prompt).toContain("本轮只允许写这些路径");
+    expect(prompt).toContain("scripts/db.js");
+    expect(prompt).toContain("必须全部引用");
     expect(prompt).not.toContain("禁止 localStorage");
     expect(prompt).toContain("能点的界面");
-    expect(prompt).toContain("不能只写说明文字");
     expect(prompt).toContain("空状态");
     expect(prompt).toContain("index.html");
   });

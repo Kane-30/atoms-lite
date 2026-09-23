@@ -28,8 +28,9 @@ describe("settleModify", () => {
     const settled = settleModify(before, []);
     expect(settled.code).toBe("NO_FILE_CHANGED");
     expect(settled.status).toBe("failed");
-    expect(settled.verifyResult).toContain("没改到");
+    expect(settled.verifyResult).toContain("未改文件");
     expect(settled.verifyResult).toContain("NO_FILE_CHANGED");
+    expect(settled.summary).toContain("不是系统崩溃");
     expect(settled.changedFiles).toEqual([]);
   });
 
@@ -39,8 +40,9 @@ describe("settleModify", () => {
     ]);
     expect(settled.code).toBe("IDENTICAL_CONTENT");
     expect(settled.status).toBe("failed");
-    expect(settled.verifyResult).toContain("没改到");
+    expect(settled.verifyResult).toContain("实质没变");
     expect(settled.verifyResult).toContain("IDENTICAL_CONTENT");
+    expect(settled.summary).toContain("不是系统崩溃");
     expect(settled.status).not.toBe("done");
   });
 
@@ -108,6 +110,22 @@ describe("collectModifyWrites", () => {
     );
     expect(writes).toEqual([]);
   });
+
+  it("rejects a final index.html that references a missing file", async () => {
+    const { writes } = await collectModifyWrites(
+      "修引用",
+      before,
+      scripted([
+        {
+          stop: true,
+          path: "index.html",
+          content:
+            '<!doctype html><html><body><button data-feature="add-record">记</button><script src="scripts/missing.js"></script></body></html>',
+        },
+      ]),
+    );
+    expect(writes).toEqual([]);
+  });
 });
 
 describe("modifyBlocked", () => {
@@ -148,6 +166,7 @@ describe("buildModifyPrompt", () => {
     expect(prompt).toContain("window.atomslite.db");
     expect(prompt).toContain("集合名");
     expect(prompt).toContain('list("');
+    expect(prompt).toContain("同一轮");
     expect(prompt).not.toContain("禁止 localStorage");
     expect(prompt).toContain("index.html");
     expect(prompt).toContain("data-feature");

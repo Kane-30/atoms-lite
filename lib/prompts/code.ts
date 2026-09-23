@@ -1,5 +1,9 @@
 import type { SpecOutput } from "@/lib/schemas/spec";
-import { atomsliteDbGuidance, interactionGuidance } from "@/lib/prompts/guidance";
+import {
+  atomsliteDbGuidance,
+  fileListGuidance,
+  interactionGuidance,
+} from "@/lib/prompts/guidance";
 
 export const CODE_PATHS = ["index.html", "styles/main.css", "scripts/app.js"] as const;
 export type CodePath = (typeof CODE_PATHS)[number];
@@ -8,6 +12,7 @@ export function buildCodePrompt(args: {
   spec: SpecOutput;
   path: string;
   written: { path: string; content: string }[];
+  allowedPaths: string[];
   repair?: string;
 }): string {
   const features = args.spec.features
@@ -16,12 +21,13 @@ export function buildCodePrompt(args: {
   const prior = args.written
     .map((file) => `----- ${file.path} -----\n${file.content}`)
     .join("\n\n");
+  const allowed = args.allowedPaths.length > 0 ? args.allowedPaths : [...CODE_PATHS];
 
   return [
     "你是前端工程师。只生成一个文件的完整内容。",
     `本次只写 ${args.path}。path 必须等于 ${args.path}。`,
     "index.html 是入口。相对路径不超过 2 层。",
-    "写 index.html 时，必须用 link/script 引入本应用已经写好和即将写好的全部 css/js；脚本按依赖顺序全部挂上，不能只挂 app.js。",
+    fileListGuidance(allowed),
     "只用浏览器原生 API。外链脚本或样式只能来自 cdn.jsdelivr.net、unpkg.com、esm.sh，能不用就不用。",
     atomsliteDbGuidance(),
     interactionGuidance(),
