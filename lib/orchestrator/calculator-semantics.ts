@@ -744,9 +744,16 @@ export async function previewCalculatorMath(files: FileRow[]): Promise<PreviewCa
   try {
     win = new Window({ url: "https://atoms.local/preview" });
     const runtimeErrors: string[] = [];
-    win.addEventListener("error", ((event: ErrorEvent) => {
-      runtimeErrors.push(event.message || "window error");
-    }) as EventListener);
+    win.addEventListener(
+      "error",
+      ((event: Event) => {
+        const message =
+          "message" in event && typeof (event as { message?: unknown }).message === "string"
+            ? (event as { message: string }).message
+            : "window error";
+        runtimeErrors.push(message || "window error");
+      }) as unknown as Parameters<NonNullable<typeof win>["addEventListener"]>[1],
+    );
     win.console.error = (...args: unknown[]) => {
       runtimeErrors.push(args.map(String).join(" "));
     };
