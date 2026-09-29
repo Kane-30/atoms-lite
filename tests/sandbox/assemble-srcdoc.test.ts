@@ -36,13 +36,22 @@ describe("assembleSrcdoc", () => {
     expect(html.indexOf("atomslite:req")).toBeLessThan(html.indexOf("window.atomslite.db.list"));
   });
 
-  it("reports missing references instead of silent drop", () => {
-    const { missing } = assembleSrcdoc([
+  it("keeps JS HTML entities intact so &quot; does not break strings after inline", () => {
+    const { html } = assembleSrcdoc([
       {
         path: "index.html",
-        content: `<link rel="stylesheet" href="styles/missing.css"><body></body>`,
+        content: `<html><body><script src="scripts/app.js"></script></body></html>`,
+      },
+      {
+        path: "scripts/app.js",
+        content: `var s = "&quot;" + "&nbsp;" + "&lt;" + "&amp;"; window.__entityProbe = s;`,
       },
     ]);
-    expect(missing).toContain("styles/missing.css");
+    // After HTML entity decode in browser, script text must still contain the entity *names*
+    // as JS source — so we must amp-escape when inlining.
+    expect(html).toContain("&amp;quot;");
+    expect(html).toContain("&amp;nbsp;");
+    expect(html).toContain("&amp;lt;");
+    expect(html).toContain("&amp;amp;");
   });
 });

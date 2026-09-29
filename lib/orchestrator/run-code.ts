@@ -10,10 +10,17 @@ import { assembleSrcdoc } from "@/lib/sandbox/assemble-srcdoc";
 import { upsertProjectFiles } from "@/lib/orchestrator/write-files";
 import { dbCallIssues } from "@/lib/orchestrator/db-call-issues";
 import {
+  alignWrittenFiles,
   atomsliteDbOverrideIssues,
   repairTargets,
   scriptWiringIssues,
 } from "@/lib/orchestrator/script-wiring";
+import {
+  ensureFeatureAnchorsInFiles,
+  normalizeSpecFeatures,
+} from "@/lib/orchestrator/feature-anchors";
+import { ensureCalculatorSemantics } from "@/lib/orchestrator/calculator-semantics";
+import { ensureDbContract } from "@/lib/orchestrator/db-contract";
 
 function usageTokens(usage: { promptTokens?: number; completionTokens?: number }) {
   return {
@@ -34,7 +41,8 @@ function indexHtmlSource(files: { path: string; content: string }[]) {
 export function problemsOf(files: { path: string; content: string }[], spec: SpecOutput) {
   const assembled = assembleSrcdoc(files);
   const indexHtml = indexHtmlSource(files);
-  const missingFeatures = spec.features
+  const features = normalizeSpecFeatures(spec).features;
+  const missingFeatures = features
     .filter((feature) => !indexHtml.includes(`data-feature="${feature.id}"`))
     .map((feature) => `缺少 data-feature="${feature.id}"`);
   const scripts = files
@@ -151,19 +159,26 @@ export async function runCodeForProject(
   await db.update(steps).set({ status: "running", attempts: (step.attempts ?? 0) + 1 }).where(eq(steps.id, step.id));
 
   const allowedPaths = [...(paths?.length ? paths : CODE_PATHS)];
+  const featureSpec = normalizeSpecFeatures(spec);
   const started = Date.now();
   try {
     const written: { path: string; content: string }[] = [];
     let tokensIn = 0;
     let tokensOut = 0;
     for (const path of allowedPaths) {
-      const result = await writeOne(spec, path, written, allowedPaths, undefined, options?.onText);
+      const result = await writeOne(featureSpec, path, written, allowedPaths, undefined, options?.onText);
       written.push(result.file);
       tokensIn += result.tokens.in;
       tokensOut += result.tokens.out;
     }
 
-    let check = problemsOf(written, spec);
+    let aligned = ensureDbContract(
+      ensureCalculatorSemantics(
+        ensureFeatureAnchorsInFiles(alignWrittenFiles(written), featureSpec.features),
+      ),
+    );
+    written.splice(0, written.length, ...aligned);
+    let check = problemsOf(written, featureSpec);
     for (let round = 0; round < MAX_REPAIR_ROUNDS && check.issues.length > 0; round += 1) {
       const reason = check.issues.join("；");
       const targets = repairTargets({
@@ -173,7 +188,7 @@ export async function runCodeForProject(
       });
       for (const path of targets) {
         const repair = await writeOne(
-          spec,
+          featureSpec,
           path,
           written.filter((file) => file.path !== path),
           allowedPaths,
@@ -184,7 +199,13 @@ export async function runCodeForProject(
         tokensIn += repair.tokens.in;
         tokensOut += repair.tokens.out;
       }
-      check = problemsOf(written, spec);
+      aligned = ensureDbContract(
+        ensureCalculatorSemantics(
+          ensureFeatureAnchorsInFiles(alignWrittenFiles(written), featureSpec.features),
+        ),
+      );
+      written.splice(0, written.length, ...aligned);
+      check = problemsOf(written, featureSpec);
     }
 
     await upsertProjectFiles(projectId, written);

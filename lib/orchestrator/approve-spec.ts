@@ -9,6 +9,7 @@ import {
   normalizeBlueprintFiles,
 } from "@/lib/schemas/blueprint";
 import { SpecSchema, type SpecOutput } from "@/lib/schemas/spec";
+import { normalizeSpecFeatures } from "@/lib/orchestrator/feature-anchors";
 
 export function pathsFromBlueprintStep(output: unknown): string[] | undefined {
   const parsed = BlueprintSchema.safeParse(output);
@@ -43,8 +44,9 @@ export async function approveSpecAndGenerate(
       .set({ status: "done", approvedAt: new Date() })
       .where(eq(steps.id, planStep.id));
     const specResult = await runSpecForProject(projectId, userId, { pause: false, onText });
-    const spec = specResult?.spec ?? parseSpecOutput(specResult?.step.output);
-    if (!spec) return null;
+    const specRaw = specResult?.spec ?? parseSpecOutput(specResult?.step.output);
+    if (!specRaw) return null;
+    const spec = normalizeSpecFeatures(specRaw);
     const blueprint = await runBlueprintForProject(projectId, userId, spec, { onText });
     return runCodeForProject(
       projectId,
@@ -68,14 +70,18 @@ export async function approveSpecAndGenerate(
 
   let spec = current;
   if (specStep.status === "waiting_approval") {
-    spec = SpecSchema.parse({
-      ...current,
-      features: features ?? current.features,
-    });
+    spec = normalizeSpecFeatures(
+      SpecSchema.parse({
+        ...current,
+        features: features ?? current.features,
+      }),
+    );
     await db
       .update(steps)
       .set({ status: "done", approvedAt: new Date(), output: spec })
       .where(eq(steps.id, specStep.id));
+  } else {
+    spec = normalizeSpecFeatures(current);
   }
 
   // Retrying code after a failed first pass: reuse the blueprint file list.

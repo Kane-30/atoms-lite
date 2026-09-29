@@ -55,18 +55,7 @@ describe("settleModify", () => {
     expect(settled.status).not.toBe("done");
   });
 
-  it("turns REGRESSION into a failed step and keeps the write", () => {
-    const broken = '<button data-feature="export">导出</button>';
-    const settled = settleModify(before, [file("index.html", broken)]);
-    expect(settled.code).toBe("REGRESSION");
-    expect(settled.status).toBe("failed");
-    expect(settled.verifyResult).toContain("data-feature");
-    expect(settled.verifyResult).toContain("add-record");
-    expect(settled.after).toEqual([file("index.html", broken)]);
-    expect(settled.changedFiles).toEqual(["index.html"]);
-  });
-
-  it("turns OK into a done step", () => {
+  it("turns OK into a done step when anchors are kept", () => {
     const settled = settleModify(before, [
       file("index.html", '<button data-feature="add-record">记一笔</button>'),
     ]);
@@ -74,6 +63,16 @@ describe("settleModify", () => {
     expect(settled.status).toBe("done");
     expect(settled.verifyResult).toBe("ok");
     expect(settled.changedFiles).toEqual(["index.html"]);
+  });
+
+  it("restores dropped anchors instead of leaving a REGRESSION write", () => {
+    const settled = settleModify(before, [
+      file("index.html", '<button data-feature="export">导出</button>'),
+    ]);
+    expect(settled.code).toBe("OK");
+    expect(settled.status).toBe("done");
+    expect(settled.after[0].content).toContain('data-feature="add-record"');
+    expect(settled.after[0].content).toContain('data-feature="export"');
   });
 });
 
@@ -120,7 +119,7 @@ describe("collectModifyWrites", () => {
     expect(writes).toEqual([]);
   });
 
-  it("rejects a final index.html that references a missing file", async () => {
+  it("strips missing refs from a final index.html instead of keeping them", async () => {
     const { writes } = await collectModifyWrites(
       "修引用",
       before,
@@ -133,7 +132,10 @@ describe("collectModifyWrites", () => {
         },
       ]),
     );
-    expect(writes).toEqual([]);
+    expect(writes).toHaveLength(1);
+    expect(writes[0].path).toBe("index.html");
+    expect(writes[0].content).not.toContain("scripts/missing.js");
+    expect(writes[0].content).toContain('data-feature="add-record"');
   });
 });
 

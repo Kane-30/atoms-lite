@@ -72,8 +72,9 @@ function findIndexHtml(files: ProjectFile[]): ProjectFile | undefined {
 
 const LINK_STYLESHEET =
   /<link\b[^>]*\brel=["']stylesheet["'][^>]*>/gi;
+/** Closed or unclosed local/remote script tags with src. */
 const SCRIPT_SRC =
-  /<script\b[^>]*\bsrc=["']([^"']+)["'][^>]*>\s*<\/script>/gi;
+  /<script\b[^>]*\bsrc=["']([^"']+)["'][^>]*>\s*(?:<\/script>)?/gi;
 
 function hrefFromLinkTag(tag: string): string | null {
   const m = tag.match(/\bhref=["']([^"']+)["']/i);
@@ -85,6 +86,11 @@ function deferAppScripts(html: string): string {
     if (body.includes("atomslite:req") || body.includes("__atomsliteReady.then")) return full;
     return `<script>window.__atomsliteReady.then(function(){\n${body}\n});</script>`;
   });
+}
+
+/** Prevent HTML from decoding &quot;/&nbsp; etc. inside inlined JS (breaks string literals). */
+export function escapeInlineScript(content: string): string {
+  return content.replace(/&/g, "&amp;").replace(/<\/(script)/gi, "<\\/$1");
 }
 
 function injectBridgeSdk(html: string): string {
@@ -179,7 +185,7 @@ export function assembleSrcdoc(files: ProjectFile[]): {
       if (!missing.includes(resolved)) missing.push(resolved);
       return `<!-- MISSING: ${resolved} -->`;
     }
-    return `<script>${content}</script>`;
+    return `<script>${escapeInlineScript(content)}</script>`;
   });
 
   html = injectBridgeSdk(html);

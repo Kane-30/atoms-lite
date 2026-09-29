@@ -5,6 +5,7 @@ import { SpecSchema, type SpecOutput } from "@/lib/schemas/spec";
 import { getDb } from "@/lib/db/client";
 import { messages, projects, rounds, steps } from "@/lib/db/schema";
 import { dedupeText, specStreamText } from "@/lib/workbench/live-stream";
+import { normalizeSpecFeatures } from "@/lib/orchestrator/feature-anchors";
 
 export async function runSpecForProject(
   projectId: string,
@@ -64,11 +65,12 @@ export async function runSpecForProject(
       onPartial: (partial) => push(specStreamText(partial)),
     });
 
+    const normalized = normalizeSpecFeatures(object);
     const [saved] = await db
       .update(steps)
       .set({
         status: options?.pause === false ? "done" : "waiting_approval",
-        output: object,
+        output: normalized,
         tokensIn: usage.promptTokens ?? 0,
         tokensOut: usage.completionTokens ?? 0,
         durationMs: Date.now() - started,
@@ -85,19 +87,19 @@ export async function runSpecForProject(
         stepId: saved.id,
         agentRole: "产品经理",
         summary: options?.pause === false
-          ? `已拆出 ${object.features.length} 个功能`
-          : `已拆出 ${object.features.length} 个功能，等待确认`,
+          ? `已拆出 ${normalized.features.length} 个功能`
+          : `已拆出 ${normalized.features.length} 个功能，等待确认`,
       },
     });
 
-    if (object.appName && project.title !== object.appName) {
+    if (normalized.appName && project.title !== normalized.appName) {
       await db
         .update(projects)
-        .set({ title: object.appName, updatedAt: new Date() })
+        .set({ title: normalized.appName, updatedAt: new Date() })
         .where(eq(projects.id, projectId));
     }
 
-    return { step: saved, created: true as const, spec: object satisfies SpecOutput };
+    return { step: saved, created: true as const, spec: normalized satisfies SpecOutput };
   } catch (error) {
     await db
       .update(steps)

@@ -14,7 +14,10 @@ import { upsertProjectFiles } from "@/lib/orchestrator/write-files";
 import { verifyApplication, type VerifyResult } from "@/lib/verify/verify-application";
 import { dedupeText, fileStreamText } from "@/lib/workbench/live-stream";
 import { dbCallIssues } from "@/lib/orchestrator/db-call-issues";
-import { scriptWiringIssues } from "@/lib/orchestrator/script-wiring";
+import { alignWrittenFiles, scriptWiringIssues } from "@/lib/orchestrator/script-wiring";
+import { restoreFeatureAnchorsInFiles } from "@/lib/orchestrator/feature-anchors";
+import { ensureCalculatorSemantics } from "@/lib/orchestrator/calculator-semantics";
+import { ensureDbContract } from "@/lib/orchestrator/db-contract";
 import {
   classifyWorkbenchIntent,
   type ModelIntentClassifier,
@@ -150,7 +153,9 @@ export function applyWrites(before: FileSnapshot[], writes: FileSnapshot[]): Fil
       after.push({ path: key, content: write.content });
     }
   }
-  return after;
+  return ensureDbContract(
+    ensureCalculatorSemantics(restoreFeatureAnchorsInFiles(before, alignWrittenFiles(after))),
+  );
 }
 
 export function settleModify(before: FileSnapshot[], writes: FileSnapshot[]): ModifySettlement {
@@ -193,6 +198,19 @@ function draftProblem(args: {
     }
   }
   return null;
+}
+
+function syncAlignedIndexWrites(before: FileSnapshot[], files: FileSnapshot[], writes: FileSnapshot[]) {
+  const aligned = alignWrittenFiles(files);
+  const index = aligned.find((file) => (normalizeModifyPath(file.path) ?? file.path) === "index.html");
+  if (!index) return writes;
+  const previous = before.find((file) => (normalizeModifyPath(file.path) ?? file.path) === "index.html");
+  if (previous && previous.content === index.content) return writes;
+  const next = writes.map((file) => ({ ...file }));
+  const at = next.findIndex((file) => (normalizeModifyPath(file.path) ?? file.path) === "index.html");
+  if (at >= 0) next[at] = { path: next[at].path, content: index.content };
+  else next.push({ path: index.path, content: index.content });
+  return next;
 }
 
 export async function collectModifyWrites(
@@ -249,7 +267,11 @@ export async function collectModifyWrites(
     if (draft.stop) break;
   }
 
-  return { writes, tokensIn, tokensOut };
+  return {
+    writes: syncAlignedIndexWrites(before, files, writes),
+    tokensIn,
+    tokensOut,
+  };
 }
 
 async function generateModifyFile(
@@ -435,10 +457,14 @@ export async function runModifyForProject(
     }
 
     const collected = await collectModifyWrites(userPrompt, before, generate);
-    if (collected.writes.length > 0) {
-      await upsertProjectFiles(projectId, collected.writes);
-    }
     let settled = settleModify(before, collected.writes);
+    const persisted = settled.after.filter((file) => {
+      const previous = before.find((item) => item.path === file.path);
+      return !previous || previous.content !== file.content;
+    });
+    if (persisted.length > 0) {
+      await upsertProjectFiles(projectId, persisted);
+    }
     let tokensIn = collected.tokensIn;
     let tokensOut = collected.tokensOut;
 
